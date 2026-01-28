@@ -1,0 +1,445 @@
+--Creating table customers
+CREATE table Customers (
+	customer_id TEXT PRIMARY KEY,
+	full_name TEXT,
+	age INTEGER, 
+	gender TEXT,
+	email TEXT,
+	city TEXT, 
+	state TEXT, 
+	registration_date date,
+	preferred_channel TEXT
+);
+
+--Creating table transactions
+CREATE TABLE Transactions(
+	customer_id TEXT,
+	transaction_id TEXT,
+	product_name TEXT,
+	product_category TEXT,
+	quantity INTEGER,
+	price Real,
+	total_revenue Real,
+	discount_applied Real,
+	TR_after_discount Real,
+	transaction_date date,
+	store_location TEXT,
+	payment_method TEXT,
+	FOREIGN KEY (customer_id) REFERENCES Customers(customer_id)
+);
+
+--Creating table ratings
+CREATE TABLE Ratings(
+	customer_id TEXT,
+	product_name TEXT,
+	product_category TEXT,
+	rating INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES Customers (customer_id)
+);
+
+--Creating table resolution scores
+CREATE TABLE ResolutionScore(
+	customer_id TEXT,
+	transaction_id TEXT,
+	issue_category TEXT,
+	priority TEXT,
+	submission_date date,
+	resolution_date date,
+	resolution_status TEXT,
+	resolution_time_hours REAL,
+	customer_satisfaction_score INTEGER,
+	FOREIGN KEY (customer_id) REFERENCES Customers (customer_id)
+);
+
+
+
+
+--Using Pragma for the table information types
+
+PRAGMA table_info(Customers);
+PRAGMA table_info(Transactions);
+PRAGMA table_info (Ratings);
+PRAGMA table_info (ResolutionScore);
+
+
+
+
+--Customer Base & Segments
+
+--1.Get the customer and their details having Maximum Revenue after discount.
+
+Select c.full_name, c.age, c.gender, c.city, c.state, c.preferred_channel, t.TR_after_discount
+ from Customers c JOIN Transactions t
+ On c.customer_id=t.customer_id 
+ where t.TR_after_discount= (SELECT max(TR_after_discount) 
+from Transactions);
+
+--2.Get the 10 customers and their details having highest revenue after discount.
+
+SELECT c.full_name, c.age, c.gender, c.city, c.state, c.preferred_channel, 
+t.TR_after_discount from Customers c JOIN Transactions t
+On c.customer_id = t.customer_id
+Order by t.TR_after_discount DESC LIMIT 10;
+
+--3.Get top 10 customers having highest revenue after discount according to each customer id.
+
+SELECT customer_id, max(TR_after_discount) as TotRev FROM Transactions 
+group by customer_id order by TotRev DESC LIMIT 10;
+
+
+/*4.Find the top 5 cities by total revenue after discounts, 
+showing average age and transaction count per city. 
+I want the table with only city and total revenue column.*/
+
+SELECT s.city, s.TotRev from 
+(SELECT c.city, t.TR_after_discount as TotRev, 
+avg(c.age) as avg_age, count(t.transaction_id)as trans_count 
+from Customers c JOIN Transactions t
+On c.customer_id=t.customer_id 
+GROUP by c.city) as s order by s.TotRev DESC Limit 5; 
+
+/*5.Find the top 5 cities by total revenue after discounts, 
+showing average age and transaction count per city. 
+I want the table with city, total revenue after discount, 
+average age and transaction count with respect to Total revenue from high to low.*/
+
+SELECT c.city, t.TR_after_discount as TotRev, AVG(c.age) AS avg_age,COUNT(t.Transaction_id) AS trans_count
+FROM Customers c JOIN Transactions t ON c.customer_id = t.customer_id
+WHERE t.TR_after_discount IS NOT NULL
+GROUP BY c.city ORDER BY Totrev DESC LIMIT 5;
+
+/*6.Find the top 5 cities by total revenue after discounts, 
+showing average age and transaction count per city. 
+I want the table with city, total revenue after discount, 
+average age and transaction count with respect to Transaction count from high to low.*/
+
+SELECT c.city, t.TR_after_discount as TotRev, avg(c.age) as avg_age, count(t.transaction_id) as trans_count
+from Customers c JOIN Transactions t on c.customer_id=t.customer_id
+where t.transaction_id is NOT NULL 
+GROUP by c.city Order by trans_count DESC LIMIT 5;
+
+
+/*7.Identify loyal customers (5+ transactions) and their preferred_channel, 
+ranked by total spend descending.*/
+
+SELECT c.full_name, c.preferred_channel, t.TR_after_discount as TotalRevenue
+from Customers c JOIN Transactions t on c.customer_id=t.customer_id 
+ORDER by TotalRevenue DESC LIMIT 10;
+
+/*8.Percentage of customers from each state have given ratings? Show only states with >10 customers.*/
+
+SELECT c.state, count(DISTINCT c.customer_id) as Total_customers,
+Count(DISTINCT CASE WHEN r.customer_id is NOT NULL
+		THEN c.customer_id END) as customers_ratings,
+round(100* count(DISTINCT CASE WHEN r.customer_id is NOT NULL 
+			THEN c.customer_id END)/ count(DISTINCT c.customer_id),2) as Percentage_customers_ratings
+FROM Customers c LEFT JOIN Ratings r On c.customer_id = r.customer_id 
+GROUP by c.state HAVING Total_customers > 10 ORDER by Percentage_customers_ratings DESC;
+
+/*9.Using CTE, list customers who spent more than average in their city, 
+with their full_name and spend amount.*/
+
+WITH customers_spending as 
+(SELECT c.customer_id, c.full_name, c.city, sum(t.TR_after_discount) as Total_spending 
+FROM Customers c JOIN Transactions t on c.customer_id=t.customer_id
+GROUP by c.customer_id, c.full_name, c.city),
+city_avg as
+(SELECT city, avg(Total_spending) as avg_spending 
+FROM customers_spending GROUP by city) 
+SELECT cs.full_name, cs.city, cs.Total_spending 
+FROM customers_spending cs JOIN city_avg ca on cs.city = ca.city
+WHERE cs.Total_spending > ca.avg_spending
+ORDER by cs.city, cs.Total_spending DESC;
+
+
+
+
+--Revenue by Channel
+
+/*1.Compare average transaction value by gender and preferred_channel, 
+using CASE to categorize as 'High/Med/Low'.*/
+
+SELECT c.gender, c.preferred_channel, avg(t.TR_after_discount) as Avg_Transactions,
+	CASE WHEN avg(t.TR_after_discount) >= 900 THEN 'High'
+		WHEN avg(t.TR_after_discount) >= 700 THEN 'Medium'
+		ELSE 'Low'
+		END as Value_category
+FROM Customers c JOIN Transactions t on c.customer_id=t.customer_id
+GROUP by c.gender, c.preferred_channel
+ORDER by Avg_Transactions DESC;
+
+
+/*2.Which product_category has the highest average rating but lowest total revenue? 
+Include store_location breakdown.*/
+
+WITH category_location as
+(SELECT t.product_category, t.store_location,
+avg(r.rating) as avg_rating, sum(t.TR_after_discount) as totalrevenue
+FROM Transactions t JOIN Ratings r on t.customer_id=r.customer_id
+and t.product_name=r.product_name and t.product_category=r.product_category
+WHERE t.TR_after_discount is NOT NULL
+GROUP by t.product_category, t.store_location),
+category_overall as
+(SELECT product_category, store_location,
+avg(avg_rating) as overall_rating, sum(totalrevenue) as overall_revenue
+FROM category_location
+GROUP by product_category)
+SELECT cl.product_category, cl.store_location,cl.avg_rating, cl.totalrevenue
+FROM category_location cl JOIN category_overall co
+on cl.product_category=co.product_category
+ORDER by co.overall_rating DESC, co.overall_revenue ASC, cl.store_location;
+
+
+/*3.Rank products by quantity sold, showing discount impact (avg discount % per product).*/
+
+SELECT product_name, product_category, sum(quantity) as sold_quantity, 
+round(avg (CASE WHEN (quantity*price)>0 
+				THEN (discount_applied*100)/(quantity*price)
+				ELSE 0
+			END),2) as avg_discount_percent
+FROM Transactions
+WHERE quantity is NOT NULL
+GROUP by product_name, product_category
+ORDER by sold_quantity DESC;
+
+/*4.Rank products by quantity sold, showing discount impact (avg discount % per product) for top 10.*/
+
+SELECT product_name, product_category, sum(quantity) as sold_quantity, 
+round(avg(CASE WHEN (quantity*price) > 0
+				THEN (discount_applied*100)/(quantity*price) 
+				ELSE 0
+			END), 2) as _avg_discount_percentage
+FROM Transactions
+WHERE quantity is NOT NULL
+GROUP by product_name, product_category
+ORDER by sold_quantity DESC
+LIMIT 10;
+
+
+/*5.Find products with >50 quantity sold that have no ratings, listing customer_ids who bought them.*/
+
+WITH PTQ as
+(SELECT product_name, product_category, sum(quantity) as total_quant
+FROM Transactions
+GROUP by product_name, product_category
+HAVING total_quant > 50)
+SELECT t.customer_id, t.product_name, t.product_category
+FROM Transactions t JOIN PTQ p 
+on t.product_name=p.product_name and t.product_category=p.product_category
+LEFT JOIN Ratings r
+on t.customer_id = r.customer_id
+and t.product_name = r.product_name
+and t.product_category = r.product_category
+WHERE r.customer_id is NULL 
+ORDER by t.product_name, t.product_category,t.customer_id;
+
+
+/*6.Using CTE, identify slow-moving products (quantity < average per category) and their total revenue.*/
+
+With products as
+(SELECT product_category, product_name, sum(quantity) as total_qty, 
+sum(TR_after_discount) as total_rev
+FROM Transactions GROUP by product_category, product_name),
+avg_category as
+(SELECT product_category, avg(total_qty) as avg_qty
+FROM products GROUP by product_category)
+SELECT p.product_category, p.product_name, p.total_qty, p.total_rev
+FROM products p JOIN avg_category c on p.product_category=c.product_category
+WHERE p.total_qty < c.avg_qty
+ORDER by p.product_category, p.total_qty ASC;
+
+
+/*7.Profitability by store: (Total Revenue - discounts) grouped by store_location
+ and payment_method, top performers only.*/
+ SELECT store_location, payment_method, sum(total_revenue) as revenue,
+ sum(discount_applied) as discount, sum(TR_after_discount) as profit
+ FROM Transactions 
+ GROUP by store_location, payment_method
+ HAVING profit > 0
+ ORDER by profit DESC;
+
+
+
+
+--Resolution Time Metrics
+
+/*1.Calculate average resolution_time_hours by priority and issue_category, categorizing speed with CASE.*/
+
+SELECT priority, issue_category, round(avg(resolution_time_hours),2) avg_resol_time, 
+(CASE WHEN avg(resolution_time_hours) <= 30 THEN "Speedy Resolved"
+		WHEN avg(resolution_time_hours) <= 50  THEN "Avg_Speed"
+		ELSE "Very_Slow"
+END) as speed_resolve
+FROM ResolutionScore 
+GROUP by priority, issue_category
+ORDER by avg_resol_time ASC, speed_resolve DESC;
+
+
+/*2.Which Transaction_ids took longest to resolve (>72 hours) and their customer_satisfaction_score?*/
+
+SELECT transaction_id, customer_satisfaction_score, resolution_time_hours
+FROM ResolutionScore
+WHERE resolution_time_hours > 72
+and resolution_status = "Resolved"
+and customer_satisfaction_score != "NA"
+and resolution_time_hours != "NA"
+GROUP by transaction_id
+ORDER by customer_satisfaction_score DESC,
+resolution_time_hours DESC;
+
+
+
+/*3.Top 3 store_locations by resolved issues per transaction volume, with satisfaction rate.*/
+
+SELECT t.store_location, count(DISTINCT t.transaction_id) as total_txn,
+count(DISTINCT CASE WHEN s.resolution_status = "Resolved"
+				THEN s.transaction_id
+				END) as resolved_status,
+round(1.0 * count(DISTINCT CASE WHEN s.resolution_status = "Resolved"
+				THEN s.transaction_id
+				END)/nullif (count(DISTINCT t.transaction_id),0),3) as resolved_per_txn,
+round(avg(s.customer_satisfaction_score),2) as avg_satisfaction_score
+FROM Transactions t LEFT JOIN ResolutionScore s on t.transaction_id=s.transaction_id
+GROUP by t.store_location
+HAVING total_txn > 0
+ORDER by resolved_per_txn DESC, avg_satisfaction_score DESC
+LIMIT 3;
+
+
+/*4.Compare customer_satisfaction_score for resolved vs pending issues by product_category.*/
+
+SELECT t.product_category, round(avg(CASE WHEN s.resolution_status = "Resolved" 
+											THEN s.customer_satisfaction_score
+										END),2) as resolved_issues,
+							round(avg(CASE WHEN s.resolution_status = "Pending"
+											THEN s.customer_satisfaction_score
+										End),2) as pending_issues
+FROM Transactions t JOIN ResolutionScore s on t.transaction_id=s.transaction_id
+GROUP by t.product_category;
+
+--comment1
+/*the pending issues shows null or 0 as per the customer_satisfaction_score as it is pending 
+so no score of satisfaction i.e., NA*/
+
+--comment2
+/*Just to check and confirm the total rows vs pending rows count with comparing customer_satisfaction_score for resolved
+vs pending issues by product_category.*/
+
+SELECT t.product_category, 
+count(*) as total_rows, sum(CASE WHEN s.resolution_status = "Pending" 
+							THEN 1 
+							ELSE 0
+						END) as pending_counts,
+round(avg(CASE WHEN s.resolution_status = "Resolved" 
+				THEN s.customer_satisfaction_score
+			END),2) as resolved_issues,
+round(avg(CASE WHEN s.resolution_status = "Pending"
+				THEN s.customer_satisfaction_score
+			End),2) as pending_issues
+FROM Transactions t JOIN ResolutionScore s on t.transaction_id=s.transaction_id
+GROUP by t.product_category;
+
+
+/*5.High-value customers (spend >5000) vs resolution success rate. Which payment_method performs worst?*/
+
+WITH high_value_customers as
+(SELECT transaction_id, payment_method, customer_id, 
+sum(TR_after_discount) as spend FROM Transactions
+GROUP by customer_id HAVING spend > 5000),
+resolution_success_rate as
+(SELECT customer_id, count (*) as total_issues,
+sum(CASE WHEN resolution_status = "Resolved" THEN 1 ELSE 0 END) as resolved_issue,
+round(1.0* sum(CASE WHEN resolution_status = "Resolved" THEN 1 ELSE 0 END)/nullif (count (*),0),2) 
+as resolved_success_rate FROM ResolutionScore
+GROUP by customer_id
+ORDER by resolved_success_rate ASC)
+SELECT h.payment_method, h.spend, r.resolved_success_rate
+FROM high_value_customers h JOIN resolution_success_rate r
+on h.customer_id=r.customer_id
+GROUP by h.payment_method
+ORDER by h.spend DESC, resolved_success_rate;
+
+/*6.High-value customers (spend >5000) vs resolution success rate in percentage. 
+Which payment_method performs worst?*/
+
+WITH high_value_customers as
+(SELECT transaction_id, customer_id, payment_method, 
+sum(TR_after_discount) as spend FROM Transactions
+GROUP by customer_id HAVING spend > 5000),
+resolution_success_rate_percent as
+(SELECT customer_id, count(*) as total_issues,
+sum(CASE WHEN resolution_status = "Resolved" THEN 1 ELSE 0 END) as resolved_issues,
+round(100.0 * sum(CASE WHEN resolution_status = "Resolved" THEN 1 ELSE 0 END)/ 
+nullif(count(*),0),2) as resolved_rate_percent
+FROM ResolutionScore 
+GROUP by customer_id 
+ORDER by resolved_rate_percent ASC)
+SELECT h.payment_method, h.spend, r.resolved_rate_percent
+FROM high_value_customers h JOIN resolution_success_rate_percent r
+on h.customer_id=r.customer_id
+GROUP by h.payment_method
+ORDER by spend DESC, resolved_rate_percent DESC;
+
+
+
+
+--Rating frequency
+
+/*1.Using window function, rank customers by number of high-priority issues, 
+showing their city and total issues.*/
+
+SELECT c.customer_id, c.city, count(s.customer_id) as total_issues,
+sum(CASE WHEN s.priority = "High" THEN 1 ELSE 0 END) as high_priority_issues,
+rank()OVER(ORDER by sum(CASE WHEN s.priority = "High" THEN 1 ELSE 0 END) DESC) as high_priority_rank
+FROM Customers c JOIN ResolutionScore s on c.customer_id=s.customer_id
+GROUP by c.city
+ORDER by high_priority_rank DESC;
+
+
+/*2.Full funnel: Customers → Transactions → Ratings → Resolutions. 
+Show avg rating and satisfaction per preferred_channel.*/
+
+SELECT DISTINCT c.preferred_channel, round(avg(r.rating),2) as avg_rating, 
+round(avg(s.customer_satisfaction_score),2)as avg_satisfaction
+FROM Customers c JOIN Ratings r on c.customer_id=r.customer_id
+JOIN Transactions t on r.customer_id=t.customer_id
+JOIN ResolutionScore s on t.transaction_id=s.transaction_id
+GROUP by c.preferred_channel;
+
+
+/*3.CTE for repeat buyers: Find customers whose avg rating improved over their last 3 transactions.*/
+
+WITH ranked_txn as
+(SELECT t.customer_id, t.transaction_id, t.transaction_date, r.rating,
+row_number()OVER(PARTITION by t.customer_id ORDER by t.transaction_date) as rownum,
+count(*)OVER(PARTITION by t.customer_id) as count_txn
+FROM Transactions t JOIN Ratings r on t.customer_id=r.customer_id),
+last3 as 
+(SELECT * FROM ranked_txn
+WHERE count_txn >=3		-- only repeat buyers with 3+ transactions
+and rownum > count_txn-3	-- keep only last 3 rows
+),
+avg_compare as
+(SELECT customer_id,
+avg(CASE WHEN rownum < max_rn THEN rating END) as previous_resolves,
+max(CASE WHEN rownum = max_rn THEN rating END) as latest_resolves FROM 
+(SELECT customer_id, rownum, rating, 
+max(rownum)OVER(PARTITION by customer_id) as max_rn 
+FROM last3) GROUP by customer_id) 
+SELECT customer_id, previous_resolves, latest_resolves
+FROM avg_compare 
+WHERE latest_resolves > previous_resolves;
+
+
+/*4.Executive dashboard query: Overall avg rating, satisfaction, resolution time, 
+and revenue by top product_category and city combo.*/
+SELECT t.product_category, c.city, round(avg(r.rating),2) as avg_rating, 
+round(avg(s.customer_satisfaction_score),2) as avg_satisfaction, 
+round(avg(s.resolution_time_hours),2) as avg_resolve_time, 
+sum(t.total_revenue) as revenue
+FROM Customers c JOIN Ratings r on c.customer_id=r.customer_id
+JOIN Transactions t on r.customer_id=t.customer_id
+JOIN ResolutionScore s on t.transaction_id=s.transaction_id
+GROUP by t.product_category, c.city
+ORDER by revenue DESC
+LIMIT 10 		--top product_category so taking 10 topmost;
